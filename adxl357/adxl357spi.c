@@ -4,16 +4,13 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 
-//~ #define DATA_FORMAT   0x31  // data format register address
-//~ #define DATA_FORMAT_B 0x0B  // data format bytes: +/- 16g range, 13-bit resolution (p. 26 of ADXL345 datasheet)
-//~ #define READ_BIT      0x80
-//~ #define MULTI_BIT     0x40
-//~ #define BW_RATE       0x2C
+
 #define POWER_CTL     0x2D
-//~ #define DATAX0        0x32
 
-const char codeVersion[3] = "2.0";  // code version number
+
+const char codeVersion[3] = "1.0";  // code version number
 
 const int timeDefault = 5;  // default duration of data stream, seconds
 const int freqDefault = 5;  // default sampling rate of data stream, Hz
@@ -69,38 +66,34 @@ int writeBytes(int handle, char *data, int count) {
     return spiWrite(handle, data, count);
 }
 
+int readFIFO(int handle, int* x, int* y, int* z){
+        char data[10] = {0,0,0,0,0,0,0,0,0,0};
+        readBytes(handle, 0x11, data, 10);
+        *x = (int32_t)((((uint32_t)data[1])<<12)|(((uint32_t)data[2])<<4)|(((uint32_t)data[3])>>4));
+        if (data[1]&0x80) *x = *x - (1<<20);
+        *y = (int32_t)((((uint32_t)data[4])<<12)|(((uint32_t)data[5])<<4)|(((uint32_t)data[6])>>4));
+        if (data[4]&0x80) *y = *y - (1<<20);
+        *z = (int32_t)((((uint32_t)data[7])<<12)|(((uint32_t)data[8])<<4)|(((uint32_t)data[9])>>4));
+        if (data[7]&0x80) *z = *z - (1<<20);
+        return 0;
+}
+
 
 int main(int argc, char *argv[]) {
-    int i;
-
-    // handling command-line arguments
-
-    int bSave = 0;
-    char vSave[256] = "";
-    double vTime = timeDefault;
-    double vFreq = freqDefault;
+    //~ int i;
+    int h0, h1;
     
-   
-    // reading sensor data
-
-    // SPI sensor setup
-    int samples = vFreq * vTime;
-    int samplesMaxSPI = freqMaxSPI * vTime;
-    int success = 1;
-    
-    int h0, h1, bytes;
+    //Buffers to read and write stuffs to SPI
     char buff[2] = {0,0};
     char data[10] = {0,0,0,0,0,0,0,0,0,0};
-    //~ char data1[10] = {0,0,0,0,0,0,0,0,0,0};
-    int32_t x, y, z;
-    //~ double tStart, tDuration, t;
     
+    int32_t x, y, z;    
     
+    // Initialize the board and connection
     if (gpioInitialise() < 0) {
         printf("Failed to initialize GPIO!");
         return 1;
     }
-    
     
     h0 = spiOpen(0, speedSPI, 0);
     h1 = spiOpen(1, speedSPI, 0);
@@ -123,22 +116,43 @@ int main(int argc, char *argv[]) {
     writeBytes(h1, buff, 2);
     
     char addr = 0x11;
-    int retnum;
     double calib = 1.0/52428.8;
-    
+    int status;
         
-    for (int i = 0; i < 100; i++)
-    {
-        retnum = readBytes(h0, addr, data, 10);
-        x = (int32_t)((((uint32_t)data[1])<<12)|(((uint32_t)data[2])<<4)|(((uint32_t)data[3])>>4));
-        if (data[1]&0x80) x = x - (1<<20);
-        y = (int32_t)((((uint32_t)data[4])<<12)|(((uint32_t)data[5])<<4)|(((uint32_t)data[6])>>4));
-        if (data[4]&0x80) y = y - (1<<20);
-        z = (int32_t)((((uint32_t)data[7])<<12)|(((uint32_t)data[8])<<4)|(((uint32_t)data[9])>>4));
-        if (data[7]&0x80) z = z - (1<<20);
-        printf("x = %f  y = %f z= %f\n", x*calib,y*calib,z*calib);
-        //~ retnum = readBytes(h0, 0x04, buff, 2);
-        //~ printf("%x\n", buff[1]);
+    for (int i = 0; i < 1000; i++)
+    {        
+        //~ readBytes(h0, 0x04, buff, 2);
+        //~ status = buff[1];
+        //~ printf("%x\n", status);
+        //~ if(status == 1){
+            //~ readFIFO(h0, &x, &y, &z);
+            //~ printf("x = %f  y = %f z= %f\n", x*calib,y*calib,z*calib);
+        //~ }
+        //~ else if (status>1){
+            //~ printf("Error %x\n", status);
+            //~ readFIFO(h0, &x, &y, &z);
+        //~ }
+        
+        readBytes(h0, 0x04, buff, 2);\
+        status = buff[1];
+        printf("%x\n",status);
+        
+        if(status == 1)
+        {
+            readBytes(h0, addr, data, 10);
+            x = (int32_t)((((uint32_t)data[1])<<12)|(((uint32_t)data[2])<<4)|(((uint32_t)data[3])>>4));
+            if (data[1]&0x80) x = x - (1<<20);
+            y = (int32_t)((((uint32_t)data[4])<<12)|(((uint32_t)data[5])<<4)|(((uint32_t)data[6])>>4));
+            if (data[4]&0x80) y = y - (1<<20);
+            z = (int32_t)((((uint32_t)data[7])<<12)|(((uint32_t)data[8])<<4)|(((uint32_t)data[9])>>4));
+            if (data[7]&0x80) z = z - (1<<20);
+            printf("x = %f  y = %f z= %f\n", x*calib,y*calib,z*calib);
+        }
+        else
+        {
+            printf("Error %x\n", status);
+            readBytes(h0, addr, data, 10);
+        }
     }
     
     
